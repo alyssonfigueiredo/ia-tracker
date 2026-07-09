@@ -69,8 +69,14 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .wrap { max-width: 1100px; margin: 0 auto; background: linear-gradient(135deg, #d9d7e2 0%, #f2ecdd 55%, #f6dfa0 100%);
     border-radius: 28px; padding: 28px; }
 
-  .intro h1 { font-size: 1.6rem; margin: 0 0 6px; font-family: var(--rounded); }
-  .intro p { margin: 0 0 20px; color: var(--text-dim); font-size: 0.9rem; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .brand-mark { position: relative; width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+    background: color-mix(in srgb, var(--accent) 18%, transparent); display: flex; align-items: center; justify-content: center; }
+  .brand-mark::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .brand-mark::after { content: ""; position: absolute; inset: 5px; border: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 50%; }
+  .intro h1 { font-size: 1.6rem; margin: 0; font-family: var(--rounded); font-weight: 700; letter-spacing: -0.01em; }
+  .intro h1 .accent { color: var(--accent); }
+  .intro p { margin: 6px 0 20px; color: var(--text-dim); font-size: 0.9rem; }
 
   .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
   .search { flex: 1; min-width: 180px; font-family: var(--sans); font-size: 0.86rem; background: #fff;
@@ -110,31 +116,47 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   }
   .card:hover::before, .card:focus-within::before { opacity: 1; }
 
-  .top-flag { position: absolute; top: -1px; right: 20px; background: var(--accent); color: #241f18; font-family: var(--mono);
-    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 0 0 10px 10px; text-transform: uppercase; }
+  .top-flag { position: absolute; top: -1px; right: 16px; background: var(--accent); color: #241f18; font-family: var(--mono);
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 0 0 8px 8px; text-transform: uppercase; }
 
-  .avatar { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
     background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); font-family: var(--rounded);
-    font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+    font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
 
-  .tile-face { display: flex; flex-direction: column; align-items: center; gap: 10px; transition: opacity .25s; }
-  .card:hover .tile-face, .card:focus-within .tile-face { opacity: 0.3; }
-  .card-name { font-family: var(--rounded); font-weight: 700; font-size: 1rem; margin: 0; line-height: 1.3;
+  /* face compacta: agora com nome+score, um resumo de 2 linhas e fonte+confiança — não só nome+score */
+  .face-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; width: 100%; }
+  .face-name { flex: 1; min-width: 0; font-family: var(--rounded); font-weight: 700; font-size: 0.92rem; margin: 0; line-height: 1.25;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-
-  .score-chip { font-family: var(--mono); font-weight: 700; font-size: 0.76rem; padding: 3px 10px; border-radius: 999px;
+  .score-chip { font-family: var(--mono); font-weight: 700; font-size: 0.72rem; padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
     background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .face-snippet { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin: 0 0 10px; width: 100%;
+    overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .face-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+  .conf-mini { font-family: var(--mono); font-size: 0.68rem; color: var(--text-dim); }
 
-  /* detalhe voa pro centro da tela e amplia — texto ganha espaço em vez de ficar espremido na coluna */
+  /* painel de detalhe: nasce em cima do card (mesma posição/tamanho) e viaja até o centro da tela —
+     translateZ dá a sensação de vir na direção de quem olha, rotateY faz o giro tipo "flip".
+     --dx/--dy são calculados no JS a cada hover; .card em si não pode ter transform/filter/backdrop-filter,
+     senão vira containing block e quebra esse position:fixed (isso já me mordeu uma vez aqui). */
+  .card:hover .tile-face-bg, .card:focus-within .tile-face-bg {
+    transform: perspective(700px) translateZ(20px) rotateY(-8deg); transform-origin: right center;
+  }
+  .tile-face-bg { transition: transform .4s, box-shadow .3s, border-color .2s; }
   .tile-detail {
     position: fixed; top: 50%; left: 50%; width: min(460px, 88vw); max-height: 78vh; overflow-y: auto;
-    background: rgba(255,255,255,0.92); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-    border: 1px solid var(--border); border-radius: 28px; padding: 26px; text-align: left;
+    background: rgba(255,255,255,0.94); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-radius: 26px; padding: 24px; text-align: left;
     box-shadow: 0 30px 60px rgba(60,45,10,0.28);
-    transform: translate(-50%, -50%) scale(0.82); opacity: 0; pointer-events: none; z-index: 50;
-    transition: transform .4s cubic-bezier(.16,1,.3,1), opacity .3s;
+    transform: perspective(1400px)
+      translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, 0px)))
+      translateZ(-380px) rotateY(180deg) scale(0.45);
+    opacity: 0; pointer-events: none; z-index: 50;
+    transition: transform 1s cubic-bezier(.16,.9,.2,1), opacity .85s ease;
   }
-  .card:hover .tile-detail, .card:focus-within .tile-detail { transform: translate(-50%, -50%) scale(1); opacity: 1; pointer-events: auto; }
+  .card:hover .tile-detail, .card:focus-within .tile-detail {
+    transform: perspective(1400px) translate(-50%, -50%) translateZ(0) rotateY(0deg) scale(1);
+    opacity: 1; pointer-events: auto;
+  }
 
   .detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
   .detail-head .avatar { width: 44px; height: 44px; font-size: 0.85rem; }
@@ -162,7 +184,10 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 <body>
 <div class="wrap">
   <div class="intro">
-    <h1>IA Tracker</h1>
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <h1><span class="accent">IA</span> Tracker</h1>
+    </div>
     <p>__TOTAL__ sinais coletados · GitHub Trending, Hacker News e Product Hunt.</p>
   </div>
 
@@ -200,10 +225,15 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
       <div class="card ${isTop ? 'top' : ''}" tabindex="0">
         <div class="tile-face-bg">
           ${isTop ? '<span class="top-flag">Top</span>' : ''}
-          <div class="tile-face">
+          <div class="face-top">
             <div class="avatar">${esc(meta.initials)}</div>
-            <p class="card-name">${esc(it.name)}</p>
+            <p class="face-name">${esc(it.name)}</p>
             <span class="score-chip">${it.score.toFixed(1)}</span>
+          </div>
+          <p class="face-snippet">${esc(it.desc)}</p>
+          <div class="face-foot">
+            <span class="src-badge ${meta.cls}">${esc(meta.label)}</span>
+            <span class="conf-mini">confiança ${it.conf}%</span>
           </div>
         </div>
         <div class="tile-detail">
@@ -244,6 +274,22 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
         <div class="cards">${groupsMap[k].map(cardHTML).join('')}</div>
       </div>
     `).join('');
+    armSlideListeners();
+  }
+
+  // painel de detalhe nasce em cima do card e desliza até o centro — calcula a distância a cada hover
+  function armSlide(card) {
+    const r = card.getBoundingClientRect();
+    const dx = (r.left + r.width / 2) - window.innerWidth / 2;
+    const dy = (r.top + r.height / 2) - window.innerHeight / 2;
+    card.style.setProperty('--dx', dx + 'px');
+    card.style.setProperty('--dy', dy + 'px');
+  }
+  function armSlideListeners() {
+    document.querySelectorAll('.card').forEach(c => {
+      c.addEventListener('mouseenter', () => armSlide(c));
+      c.addEventListener('focus', () => armSlide(c));
+    });
   }
 
   search.addEventListener('input', render);
