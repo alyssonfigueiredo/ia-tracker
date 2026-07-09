@@ -28,16 +28,25 @@ def relative_age(ts_str):
     return f"há {int(hours // 24)}d"
 
 
+def ensure_categoria_column(conn):
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(ias)").fetchall()]
+    if "categoria" not in cols:
+        conn.execute("ALTER TABLE ias ADD COLUMN categoria TEXT")
+        conn.commit()
+
+
 def get_ias():
     conn = sqlite3.connect(DB_PATH)
+    ensure_categoria_column(conn)
     c = conn.cursor()
-    c.execute("SELECT * FROM ias ORDER BY score DESC, data_coleta DESC")
+    # confianca > 0 filtra as análises que falharam no Gemini (viravam "Erro" sem info nenhuma)
+    c.execute("SELECT * FROM ias WHERE confianca > 0 ORDER BY score DESC, data_coleta DESC")
     rows = c.fetchall()
     conn.close()
 
     ias = []
     for row in rows:
-        # colunas: id, name, description, url, source, funcionalidade, aplicabilidade, score, confianca, data_coleta
+        # colunas: id, name, description, url, source, funcionalidade, aplicabilidade, score, confianca, data_coleta, categoria
         ias.append({
             "name": row[1],
             "desc": row[5] or row[2] or "",
@@ -47,6 +56,7 @@ def get_ias():
             "score": row[7] or 0,
             "conf": row[8] or 0,
             "age": relative_age(str(row[9])),
+            "category": row[10] or "Geral",
         })
     return ias
 
@@ -78,7 +88,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .intro h1 .accent { color: var(--accent); }
   .intro p { margin: 6px 0 20px; color: var(--text-dim); font-size: 0.9rem; }
 
-  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
   .search { flex: 1; min-width: 180px; font-family: var(--sans); font-size: 0.86rem; background: #fff;
     border: 1px solid var(--border); border-radius: 20px; padding: 8px 14px; color: var(--text); outline: none; }
   .search:focus { border-color: var(--accent); }
@@ -90,58 +100,63 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   .pill-btn.active { background: var(--accent); color: var(--text); border-color: var(--accent); }
   .pill-btn .n { font-family: var(--mono); opacity: 0.75; }
 
+  .row2 { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  .field-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 20px; overflow: hidden; background: #fff; }
+  .seg button { font-family: var(--sans); font-size: 0.78rem; font-weight: 600; background: none; color: var(--text-dim);
+    border: none; padding: 6px 14px; cursor: pointer; }
+  .seg button.active { background: var(--accent); color: var(--text); }
+
   .group { margin-bottom: 26px; }
   .group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; border-bottom: 1px dotted var(--text-dim); padding-bottom: 8px; }
   .group-title { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
   .group-count { font-family: var(--mono); font-size: 0.74rem; color: var(--text-dim); }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; align-items: start; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; align-items: start; }
 
-  /* .card é só um wrapper "neutro" no grid — precisa ficar livre de transform/filter/backdrop-filter,
+  /* .card (<details>) é só um wrapper "neutro" — precisa ficar livre de transform/filter/backdrop-filter,
      senão vira containing block e quebra o position:fixed do .tile-detail (isso já me mordeu uma vez aqui) */
-  .card { position: relative; text-decoration: none; color: inherit; cursor: default; }
+  .card { position: relative; }
 
+  /* a face compacta é o próprio <summary> — clique nativo do <details> abre/fecha, sem JS de toggle */
   .tile-face-bg { position: relative; background: rgba(255,255,255,0.55); border: 1px solid var(--border); border-radius: 28px;
-    padding: 22px 18px; display: flex; flex-direction: column; align-items: center; text-align: center;
+    padding: 20px 16px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px;
     backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 4px 18px rgba(150,120,40,0.1);
-    transition: box-shadow .3s, border-color .2s; }
-  .card:hover .tile-face-bg, .card:focus-within .tile-face-bg { box-shadow: 0 10px 24px rgba(150,110,30,0.18); border-color: var(--accent); }
+    box-shadow: 0 4px 18px rgba(150,120,40,0.1); cursor: pointer; list-style: none;
+    transition: transform .2s, box-shadow .2s, border-color .2s; }
+  .tile-face-bg::-webkit-details-marker, .tile-face-bg::marker { display: none; }
+  /* único "movimento" no hover — um leve lift, nada de painel abrindo sozinho */
+  .tile-face-bg:hover { transform: translateY(-3px); box-shadow: 0 10px 22px rgba(150,120,40,0.16); border-color: var(--accent); }
   .card.top .tile-face-bg { box-shadow: 0 0 0 1.5px var(--accent) inset; }
+  details.card[open] .tile-face-bg { border-color: var(--accent); }
 
-  /* fundo escurecido atrás do card em foco, só aparece durante o hover */
+  /* fundo escurecido atrás do card aberto */
   .card::before {
     content: ""; position: fixed; inset: 0; background: rgba(30,24,10,0.28); backdrop-filter: blur(3px);
     opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 40;
   }
-  .card:hover::before, .card:focus-within::before { opacity: 1; }
+  details.card[open]::before { opacity: 1; }
 
   .top-flag { position: absolute; top: -1px; right: 16px; background: var(--accent); color: #241f18; font-family: var(--mono);
     font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 0 0 8px 8px; text-transform: uppercase; }
 
-  .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  .avatar { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
     background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); font-family: var(--rounded);
-    font-weight: 700; font-size: 0.8rem; flex-shrink: 0; }
+    font-weight: 700; font-size: 0.82rem; flex-shrink: 0; }
 
-  /* face compacta: agora com nome+score, um resumo de 2 linhas e fonte+confiança — não só nome+score */
-  .face-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; width: 100%; }
-  .face-name { flex: 1; min-width: 0; font-family: var(--rounded); font-weight: 700; font-size: 0.92rem; margin: 0; line-height: 1.25;
+  /* nome sozinho na própria linha — é o que faltava espaço quando dividia linha com avatar+score */
+  .face-name { width: 100%; font-family: var(--rounded); font-weight: 700; font-size: 0.94rem; margin: 2px 0 0; line-height: 1.3;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .score-chip { font-family: var(--mono); font-weight: 700; font-size: 0.72rem; padding: 3px 9px; border-radius: 999px; flex-shrink: 0;
+  .score-chip { font-family: var(--mono); font-weight: 700; font-size: 0.72rem; padding: 3px 9px; border-radius: 999px;
     background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-  .face-snippet { font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin: 0 0 10px; width: 100%;
+  .face-snippet { width: 100%; font-size: 0.78rem; color: var(--text-dim); line-height: 1.5; margin: 2px 0 0;
     overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .face-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
+  .face-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin-top: 4px; }
   .conf-mini { font-family: var(--mono); font-size: 0.68rem; color: var(--text-dim); }
 
-  /* painel de detalhe: nasce em cima do card (mesma posição/tamanho) e viaja até o centro da tela —
+  /* painel de detalhe: nasce em cima do card (mesma posição) e viaja até o centro da tela quando abre —
      translateZ dá a sensação de vir na direção de quem olha, rotateY faz o giro tipo "flip".
-     --dx/--dy são calculados no JS a cada hover; .card em si não pode ter transform/filter/backdrop-filter,
-     senão vira containing block e quebra esse position:fixed (isso já me mordeu uma vez aqui). */
-  .card:hover .tile-face-bg, .card:focus-within .tile-face-bg {
-    transform: perspective(700px) translateZ(20px) rotateY(-8deg); transform-origin: right center;
-  }
-  .tile-face-bg { transition: transform .4s, box-shadow .3s, border-color .2s; }
+     --dx/--dy são calculados no JS a cada abertura (evento "toggle" do <details>). */
   .tile-detail {
     position: fixed; top: 50%; left: 50%; width: min(460px, 88vw); max-height: 78vh; overflow-y: auto;
     background: rgba(255,255,255,0.94); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
@@ -153,7 +168,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     opacity: 0; pointer-events: none; z-index: 50;
     transition: transform 1s cubic-bezier(.16,.9,.2,1), opacity .85s ease;
   }
-  .card:hover .tile-detail, .card:focus-within .tile-detail {
+  details.card[open] .tile-detail {
     transform: perspective(1400px) translate(-50%, -50%) translateZ(0) rotateY(0deg) scale(1);
     opacity: 1; pointer-events: auto;
   }
@@ -165,6 +180,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 
   .src-badge { font-family: var(--mono); font-size: 0.64rem; padding: 2px 9px; border-radius: 20px; text-transform: uppercase;
     letter-spacing: 0.03em; }
+  .cat-chip { font-family: var(--mono); font-size: 0.62rem; padding: 2px 9px; border-radius: 20px;
+    background: color-mix(in srgb, var(--text-dim) 14%, transparent); color: var(--text-dim); }
   .src-github { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
   .src-hn { background: color-mix(in srgb, #b3503f 16%, transparent); color: #b3503f; }
   .src-ph { background: color-mix(in srgb, #5c8a55 16%, transparent); color: #5c8a55; }
@@ -199,6 +216,14 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="row2">
+    <span class="field-label">Agrupar por</span>
+    <div class="seg" id="groupSeg">
+      <button class="active" data-group="source">Fonte</button>
+      <button data-group="category">Categoria</button>
+    </div>
+  </div>
+
   <div id="groups"></div>
   <div class="empty" id="empty">Nenhum resultado — tenta outra busca ou fonte.</div>
 </div>
@@ -210,9 +235,11 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 
   const search = document.getElementById('search');
   const pills = document.querySelectorAll('.pill-btn');
+  const groupBtns = document.querySelectorAll('#groupSeg button');
   const groupsEl = document.getElementById('groups');
   const empty = document.getElementById('empty');
   let activeSrc = 'all';
+  let groupBy = 'source';
 
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -222,26 +249,25 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     const meta = SRC_META[it.source] || { label: it.source, cls: 'src-github', initials: it.source.slice(0, 2).toUpperCase() };
     const isTop = it.score >= 9;
     return `
-      <div class="card ${isTop ? 'top' : ''}" tabindex="0">
-        <div class="tile-face-bg">
+      <details class="card ${isTop ? 'top' : ''}" name="tile-group">
+        <summary class="tile-face-bg">
           ${isTop ? '<span class="top-flag">Top</span>' : ''}
-          <div class="face-top">
-            <div class="avatar">${esc(meta.initials)}</div>
-            <p class="face-name">${esc(it.name)}</p>
-            <span class="score-chip">${it.score.toFixed(1)}</span>
-          </div>
+          <div class="avatar">${esc(meta.initials)}</div>
+          <p class="face-name">${esc(it.name)}</p>
+          <span class="score-chip">${it.score.toFixed(1)}</span>
           <p class="face-snippet">${esc(it.desc)}</p>
           <div class="face-foot">
             <span class="src-badge ${meta.cls}">${esc(meta.label)}</span>
             <span class="conf-mini">confiança ${it.conf}%</span>
           </div>
-        </div>
+        </summary>
         <div class="tile-detail">
           <div class="detail-head">
             <div class="avatar">${esc(meta.initials)}</div>
             <div class="detail-head-text">
               <p class="detail-name">${esc(it.name)}</p>
               <span class="src-badge ${meta.cls}">${esc(meta.label)}</span>
+              <span class="cat-chip">${esc(it.category)}</span>
             </div>
             <span class="score-chip">${it.score.toFixed(1)}</span>
           </div>
@@ -252,7 +278,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
             <a class="open-link" href="${esc(it.url)}" target="_blank" rel="noopener">Abrir ↗</a>
           </div>
         </div>
-      </div>`;
+      </details>`;
   }
 
   function render() {
@@ -264,9 +290,16 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 
     empty.style.display = filtered.length === 0 ? 'block' : 'none';
 
+    const key = groupBy === 'source' ? 'source' : 'category';
     const groupsMap = {};
-    filtered.forEach(it => { (groupsMap[it.source] = groupsMap[it.source] || []).push(it); });
-    const groupKeys = Object.keys(groupsMap).sort((a, b) => SOURCE_ORDER.indexOf(a) - SOURCE_ORDER.indexOf(b));
+    filtered.forEach(it => { (groupsMap[it[key]] = groupsMap[it[key]] || []).push(it); });
+
+    let groupKeys = Object.keys(groupsMap);
+    if (groupBy === 'source') {
+      groupKeys.sort((a, b) => SOURCE_ORDER.indexOf(a) - SOURCE_ORDER.indexOf(b));
+    } else {
+      groupKeys.sort((a, b) => groupsMap[b].length - groupsMap[a].length);
+    }
 
     groupsEl.innerHTML = groupKeys.map(k => `
       <div class="group">
@@ -277,7 +310,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     armSlideListeners();
   }
 
-  // painel de detalhe nasce em cima do card e desliza até o centro — calcula a distância a cada hover
+  // painel de detalhe nasce em cima do card e desliza até o centro — calcula a distância quando abre
   function armSlide(card) {
     const r = card.getBoundingClientRect();
     const dx = (r.left + r.width / 2) - window.innerWidth / 2;
@@ -287,8 +320,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
   }
   function armSlideListeners() {
     document.querySelectorAll('.card').forEach(c => {
-      c.addEventListener('mouseenter', () => armSlide(c));
-      c.addEventListener('focus', () => armSlide(c));
+      c.addEventListener('toggle', () => { if (c.open) armSlide(c); });
     });
   }
 
@@ -297,6 +329,12 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     pills.forEach(x => x.classList.remove('active'));
     p.classList.add('active');
     activeSrc = p.dataset.src;
+    render();
+  }));
+  groupBtns.forEach(b => b.addEventListener('click', () => {
+    groupBtns.forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    groupBy = b.dataset.group;
     render();
   }));
 

@@ -31,21 +31,25 @@ def init_db():
             aplicabilidade TEXT,
             score REAL,
             confianca REAL,
-            data_coleta TIMESTAMP
+            data_coleta TIMESTAMP,
+            categoria TEXT
         )
     """)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(ias)").fetchall()]
+    if "categoria" not in cols:
+        c.execute("ALTER TABLE ias ADD COLUMN categoria TEXT")
     conn.commit()
     conn.close()
 
-def save_ia(name, desc, url, source, funcionalidade, aplicabilidade, score, confianca):
+def save_ia(name, desc, url, source, funcionalidade, aplicabilidade, score, confianca, categoria):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
         c.execute("""
-            INSERT OR REPLACE INTO ias 
-            (name, description, url, source, funcionalidade, aplicabilidade, score, confianca, data_coleta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, desc, url, source, funcionalidade, aplicabilidade, score, confianca, datetime.now()))
+            INSERT OR REPLACE INTO ias
+            (name, description, url, source, funcionalidade, aplicabilidade, score, confianca, data_coleta, categoria)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, desc, url, source, funcionalidade, aplicabilidade, score, confianca, datetime.now(), categoria))
         conn.commit()
     except Exception as e:
         print(f"Erro ao salvar {name}: {e}")
@@ -123,27 +127,27 @@ def scrape_github_trending():
 def analyze_with_gemini(name, description):
     """Analisa IA com Gemini"""
     prompt = f"""Analise esta IA e responda APENAS em JSON (sem markdown):
-    
+
 Nome: {name}
 Descrição: {description}
 
 JSON:
-{{"funcionalidade": "resumo 1-2 frases", "aplicabilidade": "casos de uso separados por vírgula", "score": número 0-10, "confianca": número 0-100}}"""
-    
+{{"funcionalidade": "resumo 1-2 frases", "aplicabilidade": "casos de uso separados por vírgula", "categoria": "uma categoria curta, ex: Ferramentas de dev, Produtividade, Automação, Segurança, Dados, Mídia, Educação", "score": número 0-10, "confianca": número 0-100}}"""
+
     try:
         response = model.generate_content(prompt)
         text = response.text.strip()
-        
+
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        
+
         data = json.loads(text)
         return data
     except Exception as e:
         print(f"Erro Gemini {name}: {e}")
-        return {"funcionalidade": "Erro", "aplicabilidade": "N/A", "score": 0, "confianca": 0}
+        return {"funcionalidade": "Erro", "aplicabilidade": "N/A", "categoria": "N/A", "score": 0, "confianca": 0}
 
 # ============= MAIN =============
 def main():
@@ -176,7 +180,8 @@ def main():
             funcionalidade=analysis.get('funcionalidade', 'N/A'),
             aplicabilidade=analysis.get('aplicabilidade', 'N/A'),
             score=analysis.get('score', 0),
-            confianca=analysis.get('confianca', 0)
+            confianca=analysis.get('confianca', 0),
+            categoria=analysis.get('categoria', 'Geral')
         )
         time.sleep(13)  # ponytail: free tier do gemini-2.5-flash é 5 req/min; subir se trocar de plano
 
